@@ -3,18 +3,27 @@ import argparse
 from tinygrad import Tensor, nn
 
 from dataset import TinyShakespeare
-from models import Transfomer, Bigram
+from models import Bigram, Transfomer
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=["bigram", "transformer"], default="bigram")
+    parser.add_argument(
+        "--model", choices=["bigram", "transformer"], default="transformer"
+    )
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--sequence-length", type=int, default=32)
+    parser.add_argument("--embed-size", type=int, default=16)
     args = parser.parse_args()
 
     match args.model:
         case "bigram":
             model = Bigram(vocab_size=len(TinyShakespeare._vocab))
         case "transformer":
-            model = Transfomer(vocab_size=len(TinyShakespeare._vocab), embed_size=64)
+            model = Transfomer(
+                vocab_size=len(TinyShakespeare._vocab),
+                sequence_length=args.sequence_length,
+                embed_size=args.embed_size,
+            )
 
     train_length = len(TinyShakespeare._train_tokens)
     val_length = len(TinyShakespeare._val_tokens)
@@ -29,9 +38,10 @@ if __name__ == "__main__":
     print("y:", y.numpy())
 
     text = model.yap(0, length=100)
+    print(text.shape)
 
-    for token in text:
-        print(TinyShakespeare._token_to_char[token], end="")
+    for token in text.squeeze():
+        print(TinyShakespeare._token_to_char[token.item()], end="")
 
     optimizer = nn.optim.AdamW([model.weight], lr=0.01)
 
