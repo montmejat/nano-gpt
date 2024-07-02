@@ -43,11 +43,15 @@ if __name__ == "__main__":
     for token in text.squeeze():
         print(TinyShakespeare._token_to_char[token.item()], end="")
 
-    optimizer = nn.optim.AdamW([model.weight], lr=0.01)
+    optimizer = nn.optim.AdamW(model.weight, lr=0.01)
 
     with Tensor.train():
         for steps in range(3000):
-            x, y = TinyShakespeare.get_random_batch("train", batch_size=32)
+            x, y = TinyShakespeare.get_random_batch(
+                "train",
+                batch_size=args.batch_size,
+                sequence_length=args.sequence_length,
+            )
 
             out = model(x)
             batch, sequence_length, vocab_size = out.shape

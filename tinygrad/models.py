@@ -62,6 +62,10 @@ class SelfAttentionHead:
         value = self.value(x)
         return wei_mat @ value
 
+    @property
+    def weight(self):
+        return [self.key.weight, self.query.weight, self.value.weight]
+
 
 class Transfomer:
     def __init__(self, vocab_size: int, sequence_length: int, embed_size: int):
@@ -81,6 +85,14 @@ class Transfomer:
         x = self.self_att(token_embeddings + posit_embeddings)
         logits = self.decoder(x)
         return logits
+
+    @property
+    def weight(self):
+        return [
+            self.token_embedding.weight,
+            self.positional_embedding.weight,
+            self.decoder.weight,
+        ] + self.self_att.weight
 
     def yap(self, first_token: int, length: int):
         tokens = Tensor([[first_token]])

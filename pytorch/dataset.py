@@ -1,13 +1,13 @@
 import os
 from random import randint
 
-from tinygrad import Tensor
+import torch
 
 data = "https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt"
-if not os.path.exists("input.txt"):
-    os.system(f"wget {data}")
+if not os.path.exists("../input.txt"):
+    os.system(f"wget {data} -O ../input.txt")
 
-input = open("input.txt").read()
+input = open("../input.txt").read()
 vocab = sorted(set("".join(input)))
 char_to_token = {c: i for i, c in enumerate(vocab)}
 token_to_char = {i: c for i, c in enumerate(vocab)}
@@ -31,15 +31,24 @@ class TinyShakespeare:
                 break
             split_idx += 1
 
-        cls._train_tokens = cls._input_tokens[:split_idx]
-        cls._val_tokens = cls._input_tokens[split_idx:]
+        cls._train_tokens = torch.tensor(cls._input_tokens[:split_idx])
+        cls._val_tokens = torch.tensor(cls._input_tokens[split_idx:])
 
     @classmethod
-    def get_random_batch(cls: "TinyShakespeare", set: str, batch_size: int = 8):
+    def get_random_batch(
+        cls: "TinyShakespeare", set: str, batch_size: int = 8, sequence_length: int = 1
+    ):
         tokens = cls._train_tokens if set == "train" else cls._val_tokens
-        indexes = [randint(0, len(tokens)) for _ in range(batch_size)]
-        x = Tensor([tokens[i] for i in indexes])
-        y = Tensor([tokens[i + 1] for i in indexes])
+        indexes = [
+            randint(0, len(tokens) - sequence_length - 1) for _ in range(batch_size)
+        ]
+        x = torch.stack([tokens[i : i + sequence_length] for i in indexes])
+        y = torch.stack([tokens[i + 1 : i + sequence_length + 1] for i in indexes])
+
+        if sequence_length == 1:
+            x = x.squeeze()
+            y = y.squeeze()
+
         return x, y
 
 
