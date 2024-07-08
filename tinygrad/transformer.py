@@ -1,32 +1,9 @@
+import argparse
+
 import numpy as np
+from dataset import TinyShakespeare
+
 from tinygrad import Tensor, nn
-
-
-class Bigram:
-    def __init__(self, vocab_size: int):
-        self.embedding = nn.Embedding(vocab_size=vocab_size, embed_size=vocab_size)
-
-    def __call__(self, x: Tensor):
-        return self.embedding(x)
-
-    @property
-    def weight(self):
-        return self.embedding.weight
-
-    def yap(self, first_token: int, length: int):
-        token = first_token
-        tokens = []
-
-        for _ in range(length):
-            x = Tensor(float(token))
-            out = self(x)
-            out = out[:, :].squeeze()  # Get last token
-            out = out.softmax()  # Get probabilities
-            # Sample a random token from the distribution
-            token = np.random.multinomial(1, out.numpy()).argmax()
-            tokens.append(int(token))
-
-        return tokens
 
 
 class SelfAttentionHead:
@@ -63,7 +40,7 @@ class SelfAttentionHead:
         return wei_mat @ value
 
     @property
-    def weight(self):
+    def weights(self):
         return [self.key.weight, self.query.weight, self.value.weight]
 
 
@@ -87,15 +64,15 @@ class Transfomer:
         return logits
 
     @property
-    def weight(self):
+    def weights(self):
         return [
             self.token_embedding.weight,
             self.positional_embedding.weight,
             self.decoder.weight,
-        ] + self.self_att.weight
+        ] + self.self_att.weights
 
-    def yap(self, first_token: int, length: int):
-        tokens = Tensor([[first_token]])
+    def yap(self, first_token: Tensor, length: int):
+        tokens = first_token
 
         for _ in range(length):
             x = tokens[:, -self.sequence_length :]
@@ -107,3 +84,57 @@ class Transfomer:
             tokens = tokens.cat(Tensor([[token]]), dim=1)
 
         return tokens
+
+
+def estimate_loss(model: Transfomer, steps: int = 300):
+    out = {}
+
+    for split in ["train", "val"]:
+        losses = []
+
+        for _ in range(steps):
+            x, y = TinyShakespeare.get_random_batch(split)
+            logits = model(x)
+            loss = logits.sparse_categorical_crossentropy(y)
+            losses.append(loss.item())
+
+        out[split] = sum(losses) / len(losses)
+
+    return out
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--learning-rate", type=int, default=0.01)
+    parser.add_argument("--steps", type=int, default=100)
+    parser.add_argument("--sequence-length", type=int, default=128)
+    parser.add_argument("--embed-size", type=int, default=16)
+    args = parser.parse_args()
+
+    model = Transfomer(
+        len(TinyShakespeare._vocab), args.sequence_length, args.embed_size
+    )
+    optimizer = nn.optim.AdamW(model.weights, lr=args.learning_rate)
+
+    with Tensor.train():
+        for i in range(args.steps):
+            if i % 10 == 0:
+                losses = estimate_loss(model)
+                print(f"Step {i}: {losses}")
+
+            x, y = TinyShakespeare.get_random_batch(
+                "train", args.batch_size, args.sequence_length
+            )
+
+            logits = model(x)
+            loss = logits.sparse_categorical_crossentropy(y)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+    tokens = model.yap(Tensor([[0]]), 100)
+    for token in tokens[0]:
+        print(TinyShakespeare._token_to_char[token.item()], end="")
+    print()
