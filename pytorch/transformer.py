@@ -59,6 +59,15 @@ class MultiHeadSelfAttention(nn.Module):
         return torch.cat([head(x) for head in self.heads], dim=-1)
 
 
+class FeedForward(nn.Module):
+    def __init__(self, embed_size: int):
+        super().__init__()
+        self.net = nn.Sequential(nn.Linear(embed_size, embed_size), nn.ReLU())
+
+    def forward(self, x: Tensor):
+        return self.net(x)
+
+
 class Transfomer(nn.Module):
     def __init__(self, vocab_size: int, sequence_length: int, embed_size: int):
         super().__init__()
@@ -74,12 +83,14 @@ class Transfomer(nn.Module):
             head_size=embed_size // 4,
             num_heads=4,
         )
+        self.feed_forward = FeedForward(embed_size)
         self.decoder = nn.Linear(embed_size, vocab_size)
 
     def __call__(self, x: Tensor):
         token_embeddings = self.token_embedding(x)
         posit_embeddings = self.positional_embedding(torch.arange(x.shape[1]))
         x = self.self_att(token_embeddings + posit_embeddings)
+        x = self.feed_forward(x)
         logits = self.decoder(x)
         return logits
 
