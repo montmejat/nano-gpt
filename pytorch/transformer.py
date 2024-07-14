@@ -16,7 +16,13 @@ class SelfAttentionHead(nn.Module):
         head_size (int): The size of the head.
     """
 
-    def __init__(self, sequence_length: int, embed_size: int, head_size: int):
+    def __init__(
+        self,
+        sequence_length: int,
+        embed_size: int,
+        head_size: int,
+        dropout: float,
+    ):
         super().__init__()
 
         self.key = nn.Linear(embed_size, head_size, bias=False)
@@ -26,6 +32,8 @@ class SelfAttentionHead(nn.Module):
 
         inf = torch.full((sequence_length, sequence_length), float("-inf"))
         self.inf_tri = inf.triu(1)
+
+        self.dropout = nn.Dropout(dropout)
 
     def __call__(self, x: Tensor):
         """
@@ -37,6 +45,7 @@ class SelfAttentionHead(nn.Module):
 
         wei_mat = query @ key.transpose(-2, -1) * key.shape[-1] ** (-0.5)
         wei_mat = (wei_mat + self.inf_tri[: x.shape[1], : x.shape[1]]).softmax(-1)
+        wei_mat = self.dropout(wei_mat)
 
         value = self.value(x)
         return wei_mat @ value
@@ -44,32 +53,51 @@ class SelfAttentionHead(nn.Module):
 
 class MultiHeadSelfAttention(nn.Module):
     def __init__(
-        self, sequence_length: int, embed_size: int, head_size: int, num_heads: int
+        self,
+        sequence_length: int,
+        embed_size: int,
+        head_size: int,
+        num_heads: int,
+        dropout: float,
     ):
         super().__init__()
 
         self.heads = nn.ModuleList(
             [
-                SelfAttentionHead(sequence_length, embed_size, head_size)
+                SelfAttentionHead(sequence_length, embed_size, head_size, dropout)
                 for _ in range(num_heads)
             ]
         )
+        self.proj = nn.Linear(embed_size, embed_size)
 
     def __call__(self, x: Tensor):
-        return torch.cat([head(x) for head in self.heads], dim=-1)
+        out = torch.cat([head(x) for head in self.heads], dim=-1)
+        out = self.proj(out)
+        return out
 
 
 class FeedForward(nn.Module):
-    def __init__(self, embed_size: int):
+    def __init__(self, embed_size: int, dropout: float):
         super().__init__()
-        self.net = nn.Sequential(nn.Linear(embed_size, embed_size), nn.ReLU())
+        self.net = nn.Sequential(
+            nn.Linear(embed_size, 4 * embed_size),
+            nn.ReLU(),
+            nn.Linear(4 * embed_size, embed_size),
+            nn.Dropout(dropout),
+        )
 
     def forward(self, x: Tensor):
         return self.net(x)
 
 
 class Block(nn.Module):
-    def __init__(self, sequence_length: int, embed_size: int, num_heads: int):
+    def __init__(
+        self,
+        sequence_length: int,
+        embed_size: int,
+        num_heads: int,
+        dropout: float,
+    ):
         super().__init__()
 
         self.self_att = MultiHeadSelfAttention(
@@ -77,17 +105,32 @@ class Block(nn.Module):
             embed_size,
             head_size=embed_size // num_heads,
             num_heads=num_heads,
+            dropout=dropout,
         )
-        self.feed_forward = FeedForward(embed_size)
+        self.feed_forward = FeedForward(embed_size, dropout)
+
+        self.lnorm1 = nn.LayerNorm(embed_size)
+        self.lnorm2 = nn.LayerNorm(embed_size)
+
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: Tensor):
-        x = self.self_att(x)
-        x = self.feed_forward(x)
+        x = x + self.self_att(self.lnorm1(x))
+        x = x + self.feed_forward(self.lnorm2(x))
+        x = self.dropout(x)
         return x
 
 
 class Transfomer(nn.Module):
-    def __init__(self, vocab_size: int, sequence_length: int, embed_size: int):
+    def __init__(
+        self,
+        vocab_size: int,
+        sequence_length: int,
+        embed_size: int,
+        num_heads: int,
+        num_blocks: int,
+        dropout: float,
+    ):
         super().__init__()
 
         self.sequence_length = sequence_length
@@ -97,10 +140,12 @@ class Transfomer(nn.Module):
         self.positional_embedding = nn.Embedding(sequence_length, embed_size)
 
         self.blocks = nn.Sequential(
-            Block(sequence_length, embed_size, num_heads=4),
-            Block(sequence_length, embed_size, num_heads=4),
-            Block(sequence_length, embed_size, num_heads=4),
+            *[
+                Block(sequence_length, embed_size, num_heads, dropout)
+                for _ in range(num_blocks)
+            ]
         )
+        self.layer_norm = nn.LayerNorm(embed_size)
 
         self.decoder = nn.Linear(embed_size, vocab_size)
 
@@ -108,6 +153,7 @@ class Transfomer(nn.Module):
         token_embeddings = self.token_embedding(x)
         posit_embeddings = self.positional_embedding(torch.arange(x.shape[1]))
         x = self.blocks(token_embeddings + posit_embeddings)
+        x = self.layer_norm(x)
         logits = self.decoder(x)
         return logits
 
@@ -152,15 +198,22 @@ def estimate_loss(model: Transfomer, sequence_length: int, steps: int = 300):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--learning-rate", type=int, default=0.001)
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--learning-rate", type=int, default=3e-4)
     parser.add_argument("--steps", type=int, default=4500)
-    parser.add_argument("--sequence-length", type=int, default=8)
-    parser.add_argument("--embed-size", type=int, default=32)
+    parser.add_argument("--sequence-length", type=int, default=256)
+    parser.add_argument("--embed-size", type=int, default=384)
+    parser.add_argument("--num-heads", type=int, default=6)
+    parser.add_argument("--num-blocks", type=int, default=6)
     args = parser.parse_args()
 
     model = Transfomer(
-        len(TinyShakespeare._vocab), args.sequence_length, args.embed_size
+        len(TinyShakespeare._vocab),
+        args.sequence_length,
+        args.embed_size,
+        args.num_heads,
+        args.num_blocks,
+        dropout=0.2,
     )
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate)
 
