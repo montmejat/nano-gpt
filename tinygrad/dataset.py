@@ -1,5 +1,4 @@
 import os
-import time
 from random import randint
 
 from tinygrad import Tensor

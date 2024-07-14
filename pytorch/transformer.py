@@ -68,6 +68,24 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 
+class Block(nn.Module):
+    def __init__(self, sequence_length: int, embed_size: int, num_heads: int):
+        super().__init__()
+
+        self.self_att = MultiHeadSelfAttention(
+            sequence_length,
+            embed_size,
+            head_size=embed_size // num_heads,
+            num_heads=num_heads,
+        )
+        self.feed_forward = FeedForward(embed_size)
+
+    def forward(self, x: Tensor):
+        x = self.self_att(x)
+        x = self.feed_forward(x)
+        return x
+
+
 class Transfomer(nn.Module):
     def __init__(self, vocab_size: int, sequence_length: int, embed_size: int):
         super().__init__()
@@ -77,20 +95,19 @@ class Transfomer(nn.Module):
 
         self.token_embedding = nn.Embedding(vocab_size, embed_size)
         self.positional_embedding = nn.Embedding(sequence_length, embed_size)
-        self.self_att = MultiHeadSelfAttention(
-            sequence_length,
-            embed_size,
-            head_size=embed_size // 4,
-            num_heads=4,
+
+        self.blocks = nn.Sequential(
+            Block(sequence_length, embed_size, num_heads=4),
+            Block(sequence_length, embed_size, num_heads=4),
+            Block(sequence_length, embed_size, num_heads=4),
         )
-        self.feed_forward = FeedForward(embed_size)
+
         self.decoder = nn.Linear(embed_size, vocab_size)
 
     def __call__(self, x: Tensor):
         token_embeddings = self.token_embedding(x)
         posit_embeddings = self.positional_embedding(torch.arange(x.shape[1]))
-        x = self.self_att(token_embeddings + posit_embeddings)
-        x = self.feed_forward(x)
+        x = self.blocks(token_embeddings + posit_embeddings)
         logits = self.decoder(x)
         return logits
 
