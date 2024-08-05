@@ -1,5 +1,6 @@
 import os
 from random import randint
+from typing import Any
 
 import torch
 
@@ -33,6 +34,11 @@ class TinyShakespeare:
 
         cls._train_tokens = torch.tensor(cls._input_tokens[:split_idx])
         cls._val_tokens = torch.tensor(cls._input_tokens[split_idx:])
+
+    @classmethod
+    def to(cls: "TinyShakespeare", device: Any):
+        cls._train_tokens = cls._train_tokens.to(device)
+        cls._val_tokens = cls._val_tokens.to(device)
 
     @classmethod
     def get_random_batch(

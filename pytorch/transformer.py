@@ -43,6 +43,9 @@ class SelfAttentionHead(nn.Module):
         key = self.key(x)
         query = self.query(x)
 
+        if self.inf_tri.device != x.device:
+            self.inf_tri = self.inf_tri.to(x.device)
+
         wei_mat = query @ key.transpose(-2, -1) * key.shape[-1] ** (-0.5)
         wei_mat = (wei_mat + self.inf_tri[: x.shape[1], : x.shape[1]]).softmax(-1)
         wei_mat = self.dropout(wei_mat)
@@ -151,7 +154,9 @@ class Transfomer(nn.Module):
 
     def __call__(self, x: Tensor):
         token_embeddings = self.token_embedding(x)
-        posit_embeddings = self.positional_embedding(torch.arange(x.shape[1]))
+        posit_embeddings = self.positional_embedding(
+            torch.arange(x.shape[1]).to(x.device)
+        )
         x = self.blocks(token_embeddings + posit_embeddings)
         x = self.layer_norm(x)
         logits = self.decoder(x)
@@ -205,6 +210,7 @@ if __name__ == "__main__":
     parser.add_argument("--embed-size", type=int, default=384)
     parser.add_argument("--num-heads", type=int, default=6)
     parser.add_argument("--num-blocks", type=int, default=6)
+    parser.add_argument("--device", choices=["cuda", "cpu"], default="cuda")
     args = parser.parse_args()
 
     model = Transfomer(
@@ -215,10 +221,13 @@ if __name__ == "__main__":
         args.num_blocks,
         dropout=0.2,
     )
+    model = model.to(args.device)
     optimizer = optim.AdamW(model.parameters(), lr=args.learning_rate)
 
+    TinyShakespeare.to(args.device)
+
     for i in range(args.steps):
-        if i % 300 == 0:
+        if i % 10 == 0:
             model.eval()
             losses = estimate_loss(model, args.sequence_length)
             print(f"Step {i}: {losses}")
